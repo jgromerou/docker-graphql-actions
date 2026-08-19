@@ -1,54 +1,153 @@
-name: Docker Image CI
+name: GitHub Release CI
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+
+permissions:
+  contents: read
 
 jobs:
 
-  build:
+  # ==========================================================
+  # PR ABIERTO
+  # Calcula cuál sería la próxima versión.
+  # No crea tag.
+  # No crea Release.
+  # ==========================================================
+  check-version:
+
+    if: github.event.action != 'closed'
 
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    - name: Git Semantic Version
-      uses: paulhatch/semantic-version@v4.0.3
-      with:
-        major_pattern: "major:"
-        minor_pattern: "feat:"
-        format: "${major}.${minor}.${patch}-prerelease${increment}"
-      id: version
-      
-#    - name: Docker Login
-#      env:
-#        DOCKER_USER: ${{ secrets.DOCKER_USER }}
-#        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
-#      run: |
-#        echo "Iniciando Login"
-#        docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
-#        echo "Fin del Login"
-#        echo "New Version: $NEW_VERSION!!!!!!"
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
-#    - name: Build Docker Image
-#      env:
-#        NEW_VERSION: ${{ steps.version.outputs.version }}
-#      run: |
-#        docker build -t xx/docker-graphql:$NEW_VERSION .
-#        docker build -t xx/docker-graphql:latest .
+      - name: Calcular versión semántica
+        id: version
+        uses: paulhatch/semantic-version@v5.4.0
+        with:
+          tag_prefix: "v"
 
-#    - name: Push Docker Image
-#      env:
-#        NEW_VERSION: ${{ steps.version.outputs.version }}
-#      run: |
-#        docker push xx/docker-graphql:$NEW_VERSION
-#        docker push xx/docker-graphql:latest
+          # Ejemplo:
+          # major: cambio grande
+          major_pattern: "major:"
 
-#    - name: Build the Docker image
-#      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+          # Ejemplo:
+          # feat: nuevo módulo
+          minor_pattern: "feat:"
+
+          version_format: "${major}.${minor}.${patch}"
+
+      - name: Mostrar próxima versión
+        run: |
+          echo "=========================================="
+          echo " Próxima versión"
+          echo "=========================================="
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Tag:     ${{ steps.version.outputs.version_tag }}"
+          echo "Tipo:    ${{ steps.version.outputs.version_type }}"
+          echo "=========================================="
+
+
+  # ==========================================================
+  # PR MERGEADO A MAIN
+  # Crea automáticamente:
+  #
+  #   v1.2.3
+  #   GitHub Release
+  #   Release Notes
+  #
+  # NO crea imagen Docker.
+  # ==========================================================
+  create-release:
+
+    if: >
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Calcular versión semántica
+        id: version
+        uses: paulhatch/semantic-version@v5.4.0
+        with:
+          tag_prefix: "v"
+
+          major_pattern: "major:"
+          minor_pattern: "feat:"
+
+          version_format: "${major}.${minor}.${patch}"
+
+      - name: Obtener fecha
+        id: date
+        run: |
+          export TZ="America/Argentina/Tucuman"
+          echo "date=$(date +'%d/%m/%Y')" >> "$GITHUB_OUTPUT"
+
+      - name: Mostrar versión
+        run: |
+          echo "=========================================="
+          echo " Creando nueva versión"
+          echo "=========================================="
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Tag:     ${{ steps.version.outputs.version_tag }}"
+          echo "Tipo:    ${{ steps.version.outputs.version_type }}"
+          echo "Fecha:   ${{ steps.date.outputs.date }}"
+          echo "=========================================="
+
+      - name: Crear GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_TAG: ${{ steps.version.outputs.version_tag }}
+          RELEASE_DATE: ${{ steps.date.outputs.date }}
+
+        run: |
+          echo "Verificando Release $VERSION_TAG..."
+
+          if gh release view "$VERSION_TAG" > /dev/null 2>&1; then
+
+            echo "=========================================="
+            echo "El Release $VERSION_TAG ya existe."
+            echo "No se creará nuevamente."
+            echo "=========================================="
+
+          else
+
+            echo "Creando Release $VERSION_TAG..."
+
+            gh release create "$VERSION_TAG" \
+              --target main \
+              --title "$VERSION_TAG - $RELEASE_DATE" \
+              --generate-notes \
+              --latest
+
+            echo "=========================================="
+            echo "Release creado correctamente:"
+            echo "$VERSION_TAG - $RELEASE_DATE"
+            echo "=========================================="
+
+          fi

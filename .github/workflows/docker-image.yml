@@ -29,7 +29,8 @@ jobs:
 
 #    - name: Build Docker Image
 #      run: |
-#        docker build -t xx/docker-graphql: 0.0.2 .
+#        docker build -t xx/docker-graphql:0.0.2 .
+#        docker build -t xx/docker-graphql:latest .
 
 #    - name: Push Docker Image
 #      run: |

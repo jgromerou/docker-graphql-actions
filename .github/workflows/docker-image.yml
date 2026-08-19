@@ -175,7 +175,9 @@ jobs:
       # --------------------------------------------------------
       # INFORME DE ALMACENAMIENTO
       # --------------------------------------------------------
-      - name: Estado de almacenamiento
+      - name: Tamaño del último Release
+        continue-on-error: true
+
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION_TAG: ${{ steps.version.outputs.version_tag }}
@@ -183,68 +185,44 @@ jobs:
         run: |
 
           echo "=========================================="
-          echo " ESTADO DE ALMACENAMIENTO"
+          echo " TAMAÑO DEL ÚLTIMO RELEASE"
           echo "=========================================="
 
-          # ----------------------------------------------------
-          # Tamaño local del repositorio Git
-          # ----------------------------------------------------
-          REPO_BYTES=$(du -sb .git | cut -f1)
+          # Obtener los assets del Release recién creado
+          RELEASE_JSON=$(gh release view "$VERSION_TAG" \
+            --json tagName,assets)
 
-          REPO_HUMAN=$(numfmt \
-            --to=iec-i \
-            --suffix=B \
-            "$REPO_BYTES")
+          # Sumar el tamaño de todos los archivos adjuntos
+          RELEASE_BYTES=$(echo "$RELEASE_JSON" | jq \
+            '[.assets[].size] | add // 0')
 
-
-          # ----------------------------------------------------
-          # Total de archivos adjuntos de todos los Releases
-          # ----------------------------------------------------
-          RELEASE_BYTES=$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --paginate \
-            --slurp \
-            --jq '[.[][] | .assets[]? | .size] | add // 0')
-
-
+          # Convertir bytes a formato legible
           RELEASE_HUMAN=$(numfmt \
             --to=iec-i \
             --suffix=B \
             "$RELEASE_BYTES")
 
-
-          # ----------------------------------------------------
-          # Cantidad total de Releases
-          # ----------------------------------------------------
-          RELEASE_COUNT=$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --paginate \
-            --slurp \
-            --jq '[.[][]] | length')
-
-
           echo ""
-          echo "Repositorio Git:  $REPO_HUMAN"
-          echo "Release Assets:   $RELEASE_HUMAN"
-          echo "Releases:         $RELEASE_COUNT"
-          echo "Versión actual:   $VERSION_TAG"
+          echo "Release: $VERSION_TAG"
+          echo "Tamaño:  $RELEASE_HUMAN"
+          echo ""
+
+          # Mostrar archivos adjuntos
+          echo "Archivos adjuntos:"
+          echo "$RELEASE_JSON" | jq -r \
+            '.assets[]? | " - \(.name): \(.size) bytes"'
 
           echo ""
           echo "=========================================="
 
-
-          # ----------------------------------------------------
-          # Mostrar también en GitHub Actions → Summary
-          # ----------------------------------------------------
+          # GitHub Actions Summary
           {
-            echo "## 📦 Estado de almacenamiento"
+            echo "## 📦 Último Release"
             echo ""
             echo "| Concepto | Valor |"
             echo "|----------|-------|"
-            echo "| 🗃️ Repositorio Git | $REPO_HUMAN |"
-            echo "| 📦 Release Assets | $RELEASE_HUMAN |"
-            echo "| 🏷️ Cantidad de Releases | $RELEASE_COUNT |"
-            echo "| 🚀 Versión actual | $VERSION_TAG |"
+            echo "| 🏷️ Release | $VERSION_TAG |"
+            echo "| 📦 Tamaño | $RELEASE_HUMAN |"
             echo ""
-            echo "_Actualizado automáticamente después del Release._"
+            echo "_El tamaño corresponde a los archivos adjuntos del Release._"
           } >> "$GITHUB_STEP_SUMMARY"
